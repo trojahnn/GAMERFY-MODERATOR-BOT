@@ -1,3 +1,4 @@
-# The app's secrets and the streamer's keys: never committed.
+# The app's secrets and the streamers' keys: never committed.
 .env
+installs.json
 tokens.json

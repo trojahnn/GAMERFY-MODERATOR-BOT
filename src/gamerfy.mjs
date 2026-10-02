@@ -1,9 +1,10 @@
 /**
  * Everything this app says to the Gamerfy, and nothing else:
  *
- *   • the authorization — the streamer is sent to the authorize screen, comes
+ *   • the authorization — a streamer is sent to the authorize screen, comes
  *     back with a code, and the code becomes a pair of keys (`gfp_…` for four
- *     hours, `gfr_…` to renew it). OAuth 2 with PKCE: no secret on this machine;
+ *     hours, `gfr_…` to renew it). OAuth 2 with PKCE: no secret on this
+ *     machine. Each streamer who installs the app has a pair of her own;
  *   • the event channel — a WebSocket where the live's chat arrives as it
  *     happens (`channel.chat.message`), resumed when it drops;
  *   • the two things this app DOES in the chat — delete a line
@@ -13,7 +14,6 @@
  * "Chat: escrever e moderar").
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 /** What the app asks the streamer for: read the chat, delete a line of it, write in it. */
 export const SCOPES = 'chat:read chat:write chat:moderate';
@@ -48,29 +48,6 @@ export function authorizationOf(config) {
 
 /* --------------------------------------------------------------- the keys */
 
-/** The pair of keys, kept in a file (`tokens.json` beside package.json, never committed): the app survives a restart. */
-export function createKeyStore(file) {
-  let keys = null;
-  if (existsSync(file)) {
-    try {
-      keys = JSON.parse(readFileSync(file, 'utf8'));
-    } catch {
-      keys = null;
-    }
-  }
-  return {
-    get: () => keys,
-    set(next) {
-      keys = next;
-      writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-    },
-    clear() {
-      keys = null;
-      rmSync(file, { force: true });
-    },
-  };
-}
-
 /** `POST /oauth2/token`: a code, or a `gfr_…`, for a new pair. Throws with the server's own sentence. */
 async function tokenRequest(config, form) {
   const response = await fetch(`${config.api}/oauth2/token`, { method: 'POST', body: new URLSearchParams({ client_id: config.clientId, ...form }) });
@@ -79,12 +56,23 @@ async function tokenRequest(config, form) {
   return { accessToken: body.access_token, refreshToken: body.refresh_token, expiresAt: Date.now() + Number(body.expires_in) * 1000, scope: body.scope };
 }
 
+/** The code a streamer came back with, for her pair of keys: `{ accessToken, refreshToken, expiresAt, scope }`. */
+export const exchangeCode = (config, code, verifier) =>
+  tokenRequest(config, { grant_type: 'authorization_code', code, redirect_uri: config.redirectUri, code_verifier: verifier });
+
+/** Whose live a key is for, and what it may: `{ user_id, login, scopes, expires_in }`. It is how the app learns who just installed it. */
+export async function whoIs(config, accessToken) {
+  const response = await fetch(`${config.api}/oauth2/validate`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) throw new Error(`a chave não foi aceita (${String(response.status)})`);
+  return response.json();
+}
+
+/**
+ * The Gamerfy for ONE streamer. `store` is where her pair of keys lives: `get()` the pair (or `null` once she took
+ * the access away), `set(pair)` after a renewal, `clear()` when there is nothing left to renew with.
+ */
 export function createGamerfy(config, store) {
   let renewing = null;
-
-  const exchange = async (code, verifier) => {
-    store.set(await tokenRequest(config, { grant_type: 'authorization_code', code, redirect_uri: config.redirectUri, code_verifier: verifier }));
-  };
 
   /** A new pair from the `gfr_…` — one renewal at a time: a `gfr_…` dies the moment it is used. */
   const renew = () => {
@@ -132,17 +120,10 @@ export function createGamerfy(config, store) {
   }
 
   return {
-    exchange,
     renew,
     accessToken,
     authorized: () => store.get() !== null,
     forget: () => store.clear(),
-    /** Whose live this key is for, and what it may: `{ user_id, login, scopes, expires_in }`. */
-    whoAmI: async () => {
-      const response = await fetch(`${config.api}/oauth2/validate`, { headers: { Authorization: `Bearer ${await accessToken()}` } });
-      if (!response.ok) throw new Error(`a chave não foi aceita (${String(response.status)})`);
-      return response.json();
-    },
     /** `chat:moderate`: the line is gone for everybody. A line already gone is not an error. */
     async deleteLine(broadcasterId, messageId) {
       try {

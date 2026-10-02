@@ -4,7 +4,7 @@
  * would do: `stay`, `go`, or `either` where two people would disagree.
  *
  * `npm run battery` judges them with the rules and the model this app is set to (battery/run.mjs);
- * scripts/ai-moderator-proof/behaviour.mjs writes them in a real chat.
+ * the Gamerfy's own repository has a proof that writes them in a real chat (scripts/ai-moderator-proof/behaviour.mjs).
  */
 
 /** What a careful human would do, the line, and what it is a case of. */

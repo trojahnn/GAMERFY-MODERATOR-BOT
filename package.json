@@ -1,5 +1,5 @@
 {
-  "name": "gamerfy-example-ai-moderator",
+  "name": "gamerfy-moderator-bot",
   "version": "0.1.0",
   "private": true,
   "description": "Example app for the Gamerfy public API: an AI moderator for a live's chat.",

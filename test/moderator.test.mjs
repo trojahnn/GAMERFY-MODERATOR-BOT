@@ -6,11 +6,11 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseEnv, readConfig } from '../src/config.mjs';
+import { parseEnv, readConfig, ROOT } from '../src/config.mjs';
 import { authorizationOf, SCOPES } from '../src/gamerfy.mjs';
 import { answerOf, createJudge, questionOf, readRules, systemPrompt, undisguise, verdictOf } from '../src/judge.mjs';
 import { createModerator, toJudge, warningOf } from '../src/moderator.mjs';
-import { escapeHtml, pageHtml, stateFrame, stateWord } from '../src/page.mjs';
+import { escapeHtml, frontHtml, hourOf, panelHtml, stateFrame, stateWord } from '../src/page.mjs';
 
 const RULES = [
   { number: 1, text: 'Xingamento dirigido a uma pessoa.' },
@@ -31,8 +31,29 @@ describe('the configuration', () => {
     assert.equal(config.redirectUri, 'http://localhost:8787/callback');
     assert.equal(config.warnInChat, true);
     assert.equal(config.dryRun, false);
-    assert.match(config.keysFile, /tokens.json$/);
     assert.deepEqual(missing, ['GAMERFY_CLIENT_ID', 'AI_GATEWAY_API_KEY']);
+    // At home: the computer's own address, the page for this machine alone, a cookie that travels over http.
+    assert.equal(config.publicUrl, 'http://localhost:8787');
+    assert.equal(config.host, '127.0.0.1');
+    assert.equal(config.secureCookies, false);
+    assert.equal(config.dataDir, ROOT);
+  });
+
+  it('hosted: a public https address, every interface of the container, a data directory of its own', () => {
+    const hosted = { GAMERFY_CLIENT_ID: 'abc', AI_GATEWAY_API_KEY: 'k', PUBLIC_URL: 'https://mc-abc123.bunny.run/', PORT: '80', DATA_DIR: '/data' };
+    const { config, missing } = readConfig(hosted, 'no-such-file');
+    assert.deepEqual(missing, []);
+    assert.equal(config.publicUrl, 'https://mc-abc123.bunny.run');
+    assert.equal(config.redirectUri, 'https://mc-abc123.bunny.run/callback');
+    assert.equal(config.host, '0.0.0.0');
+    assert.equal(config.secureCookies, true);
+    assert.equal(config.dataDir, '/data');
+    // The login travels in a cookie: out on the internet, never over plain http — and an address has to be one.
+    assert.deepEqual(readConfig({ ...hosted, PUBLIC_URL: 'http://moderador.exemplo.com' }, 'no-such-file').missing, ['PUBLIC_URL (https://, fora do seu computador)']);
+    assert.deepEqual(readConfig({ ...hosted, PUBLIC_URL: 'moderador' }, 'no-such-file').missing, ['PUBLIC_URL (um endereço)']);
+    // An empty variable is one nobody set: the default stands.
+    assert.equal(readConfig({ ...hosted, AI_MODEL: '', HOST: '' }, 'no-such-file').config.model, 'inclusionai/ling-3.0-flash');
+    assert.equal(readConfig({ ...hosted, HOST: '127.0.0.1' }, 'no-such-file').config.host, '127.0.0.1');
   });
 
   it('the environment says where the Gamerfy is, the port and the two switches', () => {
@@ -330,11 +351,15 @@ describe('the moderator', () => {
   });
 });
 
-describe('the page', () => {
+describe('the panel of a streamer', () => {
+  const STREAMER = { login: 'bia', name: 'Bia' };
+  const NOTHING = { judged: 0, removed: 0, failed: 0 };
+
   it('escapes what a viewer wrote: the worst line of the chat is text, never markup', () => {
     assert.equal(escapeHtml('<script>alert("x")</script> & \'y\''), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;y&#39;');
-    const html = pageHtml({
-      state: { connected: true, authorized: true, broadcaster: { name: '<b>Bia</b>', login: 'bia' } },
+    const html = panelHtml({
+      streamer: STREAMER,
+      state: { connected: true, installed: true, broadcaster: { name: '<b>Bia</b>', login: 'bia' } },
       totals: { judged: 1, removed: 1, failed: 0 },
       decisions: [{ at: '2026-10-02T19:00:00.000Z', id: '1', who: '<img src=x onerror=alert(1)>', text: '<script>roubar()</script>', action: 'delete', rule: 1, reason: 'ofensa', ms: 9, did: 'apagada' }],
       config: { model: 'um/modelo', dryRun: false },
@@ -344,26 +369,53 @@ describe('the page', () => {
     assert.ok(!html.includes('<img src=x'));
     assert.ok(html.includes('&lt;script&gt;roubar()&lt;/script&gt;'));
     assert.ok(html.includes('Moderando o chat de &lt;b&gt;Bia&lt;/b&gt; (@bia)'));
+    // The hour is the streamer's own (Brasília), wherever the app runs.
+    assert.equal(hourOf('2026-10-02T19:00:00.000Z'), '16:00:00');
+    assert.ok(html.includes('<td class="when">16:00:00</td>'));
+    assert.ok(html.includes('href="/logout"'));
   });
 
-  it('before it is installed it offers "Instalar na minha live"', () => {
-    const html = pageHtml({ state: { connected: false, authorized: false }, totals: { judged: 0, removed: 0, failed: 0 }, decisions: [], config: { model: 'm', dryRun: true }, notice: 'Falta a permissão chat:moderate: autorize de novo.' });
-    assert.ok(html.includes('Instalar na minha live'));
-    assert.ok(html.includes('Ainda não instalado em nenhuma live'));
-    assert.ok(html.includes('modo de teste: nada é apagado'));
-    assert.ok(html.includes('Falta a permissão chat:moderate'));
+  it('says what is going on: connecting, the access taken away, a permission missing, the test mode', () => {
+    const connecting = panelHtml({ streamer: STREAMER, state: { connected: false, installed: true }, totals: NOTHING, decisions: [], config: { model: 'm', dryRun: true }, notice: 'Falta a permissão chat:moderate: instale de novo.' });
+    assert.ok(connecting.includes('Instalado na live de @bia, conectando…'));
+    assert.ok(connecting.includes('modo de teste: nada é apagado'));
+    assert.ok(connecting.includes('Falta a permissão chat:moderate'));
+    assert.ok(!connecting.includes('Instalar de novo'));
+    const gone = panelHtml({ streamer: STREAMER, state: { connected: false, installed: false, reason: 'o streamer tirou o acesso do app' }, totals: NOTHING, decisions: [], config: { model: 'm', dryRun: false }, notice: '' });
+    assert.ok(gone.includes('O app não está mais instalado na sua live'));
+    assert.ok(gone.includes('href="/install">Instalar de novo'));
+    assert.ok(gone.includes('o streamer tirou o acesso do app'));
   });
 
-  it('a page drawn before the app connected loads again: the feed says the state of now, and the page compares', () => {
-    const off = { connected: false, authorized: true };
-    const on = { connected: true, authorized: true, broadcaster: { name: 'Bia', login: 'bia' } };
+  it('a panel drawn before the app connected loads again: the feed says the state of now, and the page compares', () => {
+    const off = { connected: false, installed: true };
+    const on = { connected: true, installed: true, broadcaster: { name: 'Bia', login: 'bia' } };
     assert.notEqual(stateWord(off, ''), stateWord(on, ''));
     assert.notEqual(stateWord(on, ''), stateWord(on, 'Falta a permissão'));
+    assert.notEqual(stateWord(off, ''), stateWord({ ...off, installed: false }, ''));
     assert.equal(stateWord(on, ''), stateWord({ ...on }, ''));
-    assert.equal(stateFrame('on:bia|authorized||'), 'event: state\ndata: {"word":"on:bia|authorized||"}\n\n');
+    assert.equal(stateFrame('on:bia|installed||'), 'event: state\ndata: {"word":"on:bia|installed||"}\n\n');
     // The page carries its own word where its script reads it — escaped, like every other text on it.
-    const html = pageHtml({ state: { ...off, reason: '"><script>x</script>' }, totals: { judged: 0, removed: 0, failed: 0 }, decisions: [], config: { model: 'm', dryRun: false }, notice: '' });
-    assert.ok(html.includes('<body data-word="off|authorized|&quot;&gt;&lt;script&gt;x&lt;/script&gt;|">'));
+    const html = panelHtml({ streamer: STREAMER, state: { ...off, reason: '"><script>x</script>' }, totals: NOTHING, decisions: [], config: { model: 'm', dryRun: false }, notice: '' });
+    assert.ok(html.includes('<body data-word="off|installed|&quot;&gt;&lt;script&gt;x&lt;/script&gt;|">'));
     assert.ok(html.includes('.word !== document.body.dataset.word'));
+  });
+});
+
+describe('the front page', () => {
+  it('offers the install, says the rules as the app has them, and shows nothing of any chat', () => {
+    const html = frontHtml({ rules: [{ number: 1, text: 'Xingamento <dirigido> a uma pessoa.' }], config: { dryRun: false } });
+    assert.ok(html.includes('href="/install">Instalar na minha live'));
+    assert.ok(html.includes('<li>Xingamento &lt;dirigido&gt; a uma pessoa.</li>'));
+    assert.ok(html.includes('Configurações → Conexões → Tirar acesso'));
+    assert.ok(!html.includes('<table'));
+    assert.ok(!html.includes('EventSource'));
+    assert.ok(!html.includes('modo de teste'));
+  });
+
+  it('says why an authorization did not finish, and when the server only pretends', () => {
+    const html = frontHtml({ rules: [], config: { dryRun: true }, notice: 'A autorização foi recusada na tela do Gamerfy.' });
+    assert.ok(html.includes('<p class="note">A autorização foi recusada na tela do Gamerfy.</p>'));
+    assert.ok(html.includes('modo de teste: nada é apagado'));
   });
 });

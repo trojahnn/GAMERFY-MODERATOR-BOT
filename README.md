@@ -16,7 +16,10 @@ chat da live ──(canal de eventos, chat:read)──▶ Moderador IA ──▶
 
 Sem dependências: Node 22 ou mais novo já traz o `fetch` e o `WebSocket`.
 
-## Instalar
+Um processo só atende **todos os streamers que instalaram**: cada um tem as suas chaves, a sua conexão com a própria
+live e o seu painel, que abre só para ele. Autorizar o app no Gamerfy é o login — não existe senha do app.
+
+## Rodar no seu computador
 
 ### 1. Cadastre o app no Gamerfy (uma vez)
 
@@ -33,7 +36,6 @@ No Gamerfy, em **Configurações → Desenvolvedor**:
 ### 2. Configure
 
 ```bash
-cd examples/ai-moderator
 cp .env.example .env
 ```
 
@@ -51,12 +53,36 @@ npm start
 ```
 
 Abra **http://localhost:8787** e clique em **Instalar na minha live**. O Gamerfy mostra o que o app vai poder — ler o
-chat, escrever no chat com o nome do app, apagar mensagens do chat — e, autorizado, a página passa a dizer
-"Moderando o chat de …". Pronto: escreva no chat da live (com outra conta) e veja cada decisão aparecer na página.
+chat, escrever no chat com o nome do app, apagar mensagens do chat — e, autorizado, você volta já no seu painel, que
+passa a dizer "Moderando o chat de …". Pronto: escreva no chat da live (com outra conta) e veja cada decisão aparecer.
 
-O app guarda a autorização em `tokens.json` e a renova sozinho: da próxima vez, `npm start` já conecta.
+O app guarda quem instalou em `installs.json` e renova as chaves sozinho: da próxima vez, `npm start` já conecta
+todo mundo.
 
-**Para tirar o app da live:** Configurações → Conexões → Tirar acesso. O app para na hora.
+**Para tirar o app da live:** Configurações → Conexões → Tirar acesso. O app para na hora, só para aquela live.
+
+## Hospedar
+
+Para o app ficar no ar para qualquer streamer, ele roda num container. O `Dockerfile` monta a imagem (Node 22 e o
+código, nada mais) e o `.github/workflows/publish.yml` a publica no GitHub Container Registry a cada push:
+`ghcr.io/<dono>/<repositório>:latest`, e `:sha-<commit>` para saber qual build é qual.
+
+O que o container precisa, em qualquer hospedagem:
+
+| | |
+|---|---|
+| **Porta** | `80` (a imagem já sobe nela). `/health` responde `ok` com o processo no ar. |
+| **Uma pasta que não se perde** | Um volume montado em `/data`. É lá que fica o `installs.json`; sem volume, cada reinício esquece quem instalou e todo mundo tem de autorizar de novo. |
+| **Uma instância só** | Cada instância abre a sua conexão com cada live: duas instâncias julgariam e avisariam em dobro. |
+| **Variáveis de ambiente** | `GAMERFY_CLIENT_ID`, `AI_GATEWAY_API_KEY` e `PUBLIC_URL` (o endereço público, com `https://`). As outras do `.env.example` são opcionais. |
+
+No cadastro do app (Configurações → Desenvolvedor), o endereço de volta passa a ser `<PUBLIC_URL>/callback` e a
+"Página do app", o próprio `PUBLIC_URL`.
+
+O `installs.json` tem as chaves de cada streamer e o segredo que assina o login do painel: o volume é tão sensível
+quanto um `.env`.
+
+Um app ainda **não revisado** pelo Gamerfy pode ser autorizado por até 10 streamers; acima disso, peça a revisão.
 
 ## Ajustar
 
@@ -107,18 +133,24 @@ Um modelo maior erra menos em caso difícil e custa mais; troque em `AI_MODEL` e
 
 | Arquivo | O que faz |
 |---|---|
-| `src/index.mjs` | Liga tudo e serve a página do app (`/`, `/install`, `/callback`). |
+| `src/index.mjs` | Liga tudo e serve as páginas: a de entrada (`/`), a autorização (`/install`, `/callback`), o painel de quem está logado (`/painel`, `/feed`), `/logout` e `/health`. |
+| `src/config.mjs` | A configuração: o `.env` e as variáveis de ambiente. |
 | `src/gamerfy.mjs` | A conversa com o Gamerfy: a autorização (OAuth 2 com PKCE), a renovação das chaves, o canal de eventos (com retomada) e as duas rotas de chat. |
+| `src/installs.mjs` | Quem instalou: para cada streamer, as chaves, a conexão com a live dele e o seu moderador. |
+| `src/store.mjs` | O `installs.json`: o que o app lembra de um reinício para o outro. |
+| `src/session.mjs` | O login do painel: um cookie assinado que diz de quem é aquele navegador. |
 | `src/judge.mjs` | O juiz: monta o pedido ao modelo e lê o veredito. |
 | `src/moderator.mjs` | O que acontece com cada mensagem: julgar, apagar, avisar. |
-| `src/page.mjs` | A página que mostra as decisões ao vivo. |
+| `src/page.mjs` | As duas páginas: a de entrada e o painel, que mostra as decisões ao vivo. |
 | `rules.md` | As regras do chat. |
 | `battery/` | As frases de teste (`lines.mjs`) e o `npm run battery` (`run.mjs`). |
 | `test/` | Os testes das partes que decidem alguma coisa: `npm test`. |
+| `Dockerfile`, `.github/` | A imagem do container e a sua publicação. |
 
 ## O que este exemplo não é
 
-Um moderador de produção. Ele roda na sua máquina, modera **uma** live (a de quem autorizou por último) e não guarda
-histórico. Um modelo de linguagem erra: deixa passar o que não devia e, às vezes, tira o que podia ficar — comece com
-`DRY_RUN=true` e leia o que ele decidiria. E ele só apaga mensagem: não silencia nem bloqueia ninguém (a API pública
-ainda não tem isso).
+Um moderador de produção. As regras são as mesmas para toda live (o `rules.md`), o painel só lembra as últimas
+decisões enquanto o processo está no ar, e tudo cabe num processo só e num arquivo — o bastante para algumas dezenas
+de lives, não para milhares. Um modelo de linguagem erra: deixa passar o que não devia e, às vezes, tira o que podia
+ficar — comece com `DRY_RUN=true` e leia o que ele decidiria. E ele só apaga mensagem: não silencia nem bloqueia
+ninguém (a API pública ainda não tem isso).
