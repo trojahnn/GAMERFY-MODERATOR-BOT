@@ -1,5 +1,6 @@
 # Nothing of this machine goes into the image: not its secrets, not the streamers' keys.
 .env
+.env.*
 installs.json
 tokens.json
 .git
