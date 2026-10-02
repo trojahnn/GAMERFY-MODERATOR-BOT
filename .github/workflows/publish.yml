@@ -14,6 +14,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      # Optional (see the last step). A secret cannot be read in a step's `if`, an environment variable can.
+      BUNNYNET_API_KEY: ${{ secrets.BUNNYNET_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,3 +43,16 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+      # A Bunny container keeps the exact image it started with (a digest, not the tag): a new `:latest` in the
+      # registry changes nothing there until the container is told which tag to take. With the account's key saved
+      # as this repository's secret BUNNYNET_API_KEY and the app's id as its variable BUNNY_APP_ID, this step tells
+      # it, and a push ends with the new code on the air. Without them the step is skipped, and the container is
+      # updated by hand (README.md, "Na Bunny").
+      - name: Tell the container to take the new image
+        if: env.BUNNYNET_API_KEY != '' && vars.BUNNY_APP_ID != ''
+        uses: BunnyWay/actions/container-update-image@main
+        with:
+          app_id: ${{ vars.BUNNY_APP_ID }}
+          api_key: ${{ env.BUNNYNET_API_KEY }}
+          container: gamerfy-moderator-bot
+          image_tag: sha-${{ github.sha }}

@@ -84,6 +84,25 @@ quanto um `.env`.
 
 Um app ainda **não revisado** pelo Gamerfy pode ser autorizado por até 10 streamers; acima disso, peça a revisão.
 
+### Na Bunny (Magic Containers)
+
+É onde este app roda. O que foi escolhido lá, e por quê:
+
+- **Imagem** `ghcr.io/trojahnn/gamerfy-moderator-bot`, tag `latest`.
+- **Endpoint** do tipo CDN apontando para a porta `80` do container, com "Force SSL" ligado no endereço: o login
+  viaja num cookie que só anda por `https`. O endereço `mc-….bunny.run` que a Bunny dá é o `PUBLIC_URL`.
+- **Volume** de 1 GB montado em `/data`. Ele mora num servidor só e não tem cópia de segurança: se a Bunny trocar o
+  disco, o app esquece quem instalou e cada streamer autoriza de novo (um clique). Nada mais se perde.
+- **Autoscaling 1 / 1**: uma instância, sempre.
+- O painel recebe as decisões ao vivo por um fluxo de eventos; a borda da Bunny o entrega sem configuração, desde
+  que ele não fique mudo — o app manda um sinal a cada 25 segundos.
+
+**Atualizar o app:** o container guarda a imagem exata com que subiu, não a tag — uma `latest` nova no registro não
+muda nada lá. Depois do push, diga ao container qual tag pegar: no painel da Bunny (o container → imagem → a tag
+`sha-<commit>`), ou deixe o próprio push fazer isso salvando no repositório do GitHub o segredo `BUNNYNET_API_KEY`
+(a chave da conta na Bunny) e a variável `BUNNY_APP_ID` (o id do app): o último passo do `publish.yml` só roda com
+os dois.
+
 ## Ajustar
 
 - **As regras** são o arquivo [`rules.md`](rules.md): cada linha numerada é uma regra. Edite e reinicie o app.

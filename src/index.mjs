@@ -153,8 +153,9 @@ const server = http.createServer((request, response) => {
       response.writeHead(401).end();
       return;
     }
-    // `no-transform` and `X-Accel-Buffering`: an edge in front of the app must hand each event on as it comes.
-    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    // `no-cache`, `no-transform` and `X-Accel-Buffering`: an edge in front of the app must hand each event on as it
+    // comes, and keep none of it (a CDN caches an event stream like any other answer unless it is told not to).
+    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-store, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     // The word of now, first: a panel drawn a moment ago may already be behind.
     response.write(stateFrame(wordOf(userId)));
     // A line nobody reads, every so often: an edge closes a connection that stays silent for long.
