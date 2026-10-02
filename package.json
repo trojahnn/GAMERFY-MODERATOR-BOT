@@ -1,0 +1,15 @@
+{
+  "name": "gamerfy-example-ai-moderator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example app for the Gamerfy public API: an AI moderator for a live's chat.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "battery": "node battery/run.mjs",
+    "test": "node --test \"test/**/*.test.mjs\""
+  }
+}
